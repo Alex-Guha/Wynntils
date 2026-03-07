@@ -22,6 +22,7 @@ import com.wynntils.mc.event.UseItemEvent;
 import com.wynntils.models.character.type.ClassType;
 import com.wynntils.models.items.properties.ClassableItemProperty;
 import com.wynntils.models.items.properties.RequirementItemProperty;
+import com.wynntils.models.spells.event.SpellEvent;
 import com.wynntils.models.spells.type.SpellDirection;
 import com.wynntils.models.worlds.event.WorldStateEvent;
 import com.wynntils.utils.mc.McUtils;
@@ -71,6 +72,10 @@ public class QuickCastFeature extends Feature {
 
     private int lastSpellTick = 0;
     private int packetCountdown = 0;
+    private boolean awaitingConfirmation = false;
+    private boolean spellMismatchDetected = false;
+    private List<SpellDirection> lastQueuedSpell = List.of();
+    private List<SpellDirection> expectedCompletedSpell = List.of();
 
     public QuickCastFeature() {
         super(ProfileDefault.ENABLED);
@@ -110,6 +115,31 @@ public class QuickCastFeature extends Feature {
         resetState();
     }
 
+    @SubscribeEvent
+    public void onSpellCompleted(SpellEvent.Completed e) {
+        if (awaitingConfirmation && !expectedCompletedSpell.isEmpty()) {
+            SpellDirection[] completed = e.getSpellDirectionArray();
+            boolean matches = completed.length == expectedCompletedSpell.size();
+            for (int i = 0; matches && i < completed.length; i++) {
+                matches = completed[i] == expectedCompletedSpell.get(i);
+            }
+            if (!matches) {
+                spellMismatchDetected = true;
+            }
+        }
+        awaitingConfirmation = false;
+    }
+
+    @SubscribeEvent
+    public void onSpellExpired(SpellEvent.Expired e) {
+        awaitingConfirmation = false;
+    }
+
+    @SubscribeEvent
+    public void onSpellFailed(SpellEvent.Failed e) {
+        awaitingConfirmation = false;
+    }
+
     private void castFirstSpell() {
         tryCastSpell(SpellUnit.PRIMARY, SpellUnit.SECONDARY, SpellUnit.PRIMARY);
     }
@@ -140,11 +170,6 @@ public class QuickCastFeature extends Feature {
             sendCancelReason(Component.translatable("feature.wynntils.quickCast.spellInProgress"));
             return;
         }
-        if (safeCasting.get() == SafeCastType.FINISH_COMPATIBLE && spellInProgress.length != 0 && lastSpellTick == 0) {
-            sendCancelReason(Component.translatable("feature.wynntils.quickCast.spellInProgress"));
-            return;
-        }
-
         boolean isArcher = Models.Character.getClassType() == ClassType.ARCHER;
 
         if (checkValidWeapon.get()) {
@@ -184,16 +209,26 @@ public class QuickCastFeature extends Feature {
         List<SpellDirection> confirmedSpell = new ArrayList<>(unconfirmedSpell);
 
         if (safeCasting.get() == SafeCastType.FINISH_COMPATIBLE && spellInProgress.length != 0) {
-            for (int i = 0; i < spellInProgress.length; i++) {
-                if (spellInProgress[i] == unconfirmedSpell.get(i)) {
-                    confirmedSpell.removeFirst();
-                } else {
-                    sendCancelReason(Component.translatable("feature.wynntils.quickCast.incompatibleInProgress"));
-                    return;
+            if (awaitingConfirmation) {
+                // We recently sent a complete spell and the server hasn't confirmed it yet.
+                // The in-progress state is from our own send still being processed.
+                // Queue the full new spell -- the server will finish the old one on its own.
+            } else {
+                // No recent send from us. This is a genuine in-progress spell
+                // (e.g., from manual clicking, weapon switch interruption, or confirmed packet loss).
+                // Apply compatibility logic to finish it if possible.
+                for (int i = 0; i < spellInProgress.length; i++) {
+                    if (spellInProgress[i] == unconfirmedSpell.get(i)) {
+                        confirmedSpell.removeFirst();
+                    } else {
+                        sendCancelReason(Component.translatable("feature.wynntils.quickCast.incompatibleInProgress"));
+                        return;
+                    }
                 }
             }
         }
 
+        lastQueuedSpell = List.copyOf(unconfirmedSpell);
         Models.Spell.addSpellToQueue(confirmedSpell);
     }
 
@@ -222,6 +257,15 @@ public class QuickCastFeature extends Feature {
 
         if (Models.Spell.isSpellQueueEmpty()) {
             lastSpellTick = 0;
+            if (spellMismatchDetected) {
+                // A different spell than intended was confirmed -- input was likely dropped.
+                // Force compatibility mode for the next spell to break any cascade.
+                awaitingConfirmation = false;
+                spellMismatchDetected = false;
+            } else {
+                awaitingConfirmation = true;
+                expectedCompletedSpell = lastQueuedSpell;
+            }
             packetCountdown = Math.max(packetCountdown, spellCooldown.get());
         }
     }
@@ -229,6 +273,10 @@ public class QuickCastFeature extends Feature {
     private void resetState() {
         lastSpellTick = 0;
         packetCountdown = 0;
+        awaitingConfirmation = false;
+        spellMismatchDetected = false;
+        lastQueuedSpell = List.of();
+        expectedCompletedSpell = List.of();
     }
 
     private static void sendCancelReason(MutableComponent reason) {
