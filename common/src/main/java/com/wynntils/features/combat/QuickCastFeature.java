@@ -160,7 +160,8 @@ public class QuickCastFeature extends Feature {
         if (!Models.Spell.isSpellQueueEmpty()) return;
 
         SpellDirection[] spellInProgress = Models.Spell.getLastSpell();
-        // SpellModel keeps the last spell for other uses but here we just want to know the inputs so if a full spell
+        // SpellModel keeps the last spell for other uses but here we just want to know
+        // the inputs so if a full spell
         // is the last spell then we just reset it to empty
         if (spellInProgress.length == 3) {
             spellInProgress = SpellDirection.NO_SPELL;
@@ -170,6 +171,11 @@ public class QuickCastFeature extends Feature {
             sendCancelReason(Component.translatable("feature.wynntils.quickCast.spellInProgress"));
             return;
         }
+        if (safeCasting.get() == SafeCastType.FINISH_COMPATIBLE && spellInProgress.length != 0 && lastSpellTick == 0) {
+            sendCancelReason(Component.translatable("feature.wynntils.quickCast.spellInProgress"));
+            return;
+        }
+
         boolean isArcher = Models.Character.getClassType() == ClassType.ARCHER;
 
         if (checkValidWeapon.get()) {
@@ -180,7 +186,8 @@ public class QuickCastFeature extends Feature {
                 return;
             }
 
-            // First check if the character is an archer or not in case CharacterModel failed to parse correctly
+            // First check if the character is an archer or not in case CharacterModel
+            // failed to parse correctly
             Optional<ClassableItemProperty> classItemPropOpt =
                     Models.Item.asWynnItemProperty(heldItem, ClassableItemProperty.class);
 
@@ -209,13 +216,36 @@ public class QuickCastFeature extends Feature {
         List<SpellDirection> confirmedSpell = new ArrayList<>(unconfirmedSpell);
 
         if (safeCasting.get() == SafeCastType.FINISH_COMPATIBLE && spellInProgress.length != 0) {
+            for (int i = 0; i < spellInProgress.length; i++) {
+                if (spellInProgress[i] == unconfirmedSpell.get(i)) {
+                    confirmedSpell.removeFirst();
+                } else {
+                    sendCancelReason(Component.translatable("feature.wynntils.quickCast.incompatibleInProgress"));
+                    return;
+                }
+            }
+        }
+
+        if (safeCasting.get() == SafeCastType.PREVENT_MISCAST_CASCADE && spellInProgress.length != 0) {
             if (awaitingConfirmation) {
                 // We recently sent a complete spell and the server hasn't confirmed it yet.
                 // The in-progress state is from our own send still being processed.
                 // Queue the full new spell -- the server will finish the old one on its own.
+                //
+                // NOTE: There is a known timing-window issue here. If a packet was dropped from
+                // our last send, the in-progress state could represent genuine packet loss
+                // rather than server processing delay. In that case, queueing the full spell
+                // can cause the wrong spell to complete on the server (e.g., residual clicks
+                // combine with the new spell's clicks, shifting the 3-click boundary). This can
+                // cascade into further mismatched or even non-player spells (starting with L).
+                // This window is narrow in practice: it requires the player to cast fast enough
+                // that awaitingConfirmation is still true, but slow enough that the stale
+                // action bar update has arrived. Spell expiry events typically clear
+                // awaitingConfirmation within a few seconds, limiting the exposure.
             } else {
                 // No recent send from us. This is a genuine in-progress spell
-                // (e.g., from manual clicking, weapon switch interruption, or confirmed packet loss).
+                // (e.g., from manual clicking, weapon switch interruption, or confirmed packet
+                // loss).
                 // Apply compatibility logic to finish it if possible.
                 for (int i = 0; i < spellInProgress.length; i++) {
                     if (spellInProgress[i] == unconfirmedSpell.get(i)) {
@@ -228,7 +258,9 @@ public class QuickCastFeature extends Feature {
             }
         }
 
-        lastQueuedSpell = List.copyOf(unconfirmedSpell);
+        if (safeCasting.get() == SafeCastType.PREVENT_MISCAST_CASCADE) {
+            lastQueuedSpell = List.copyOf(unconfirmedSpell);
+        }
         Models.Spell.addSpellToQueue(confirmedSpell);
     }
 
@@ -257,14 +289,16 @@ public class QuickCastFeature extends Feature {
 
         if (Models.Spell.isSpellQueueEmpty()) {
             lastSpellTick = 0;
-            if (spellMismatchDetected) {
-                // A different spell than intended was confirmed -- input was likely dropped.
-                // Force compatibility mode for the next spell to break any cascade.
-                awaitingConfirmation = false;
-                spellMismatchDetected = false;
-            } else {
-                awaitingConfirmation = true;
-                expectedCompletedSpell = lastQueuedSpell;
+            if (safeCasting.get() == SafeCastType.PREVENT_MISCAST_CASCADE) {
+                if (spellMismatchDetected) {
+                    // A different spell than intended was confirmed -- input was likely dropped.
+                    // Force compatibility mode for the next spell to break any cascade.
+                    awaitingConfirmation = false;
+                    spellMismatchDetected = false;
+                } else {
+                    awaitingConfirmation = true;
+                    expectedCompletedSpell = lastQueuedSpell;
+                }
             }
             packetCountdown = Math.max(packetCountdown, spellCooldown.get());
         }
@@ -291,6 +325,7 @@ public class QuickCastFeature extends Feature {
     public enum SafeCastType {
         NONE,
         BLOCK_ALL,
-        FINISH_COMPATIBLE
+        FINISH_COMPATIBLE,
+        PREVENT_MISCAST_CASCADE
     }
 }

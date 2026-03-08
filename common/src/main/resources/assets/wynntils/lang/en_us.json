@@ -1340,7 +1340,7 @@
   "feature.wynntils.quickCast.notMetRequirements": "You do not meet the requirements to use this weapon!",
   "feature.wynntils.quickCast.rightClickTickDelay.description": "How many ticks delay should there be before a new right-click is sent? Setting this too low will cause your clicks to be ignored.",
   "feature.wynntils.quickCast.rightClickTickDelay.name": "Right-Click Tick Delay",
-  "feature.wynntils.quickCast.safeCasting.description": "How should safe casting work? None - always allow quick casts. Block All - if a spell is in progress, do not allow quick casts until it has expired. Finish Compatible - complete the spell if the one to queue is compatible, block attacks during quick cast feature does not work well with this option.",
+  "feature.wynntils.quickCast.safeCasting.description": "How should safe casting work? None - always allow quick casts. Block All - if a spell is in progress, do not allow quick casts until it has expired. Finish Compatible - complete the spell if the one to queue is compatible, block attacks during quick cast feature does not work well with this option. Prevent Miscast Cascade - like Finish Compatible, but also detects when spell clicks are dropped and prevents the remaining clicks from cascading into unintended spells.",
   "feature.wynntils.quickCast.safeCasting.name": "Safe Casting",
   "feature.wynntils.quickCast.spellCooldown.description": "Cooldown before casting another spell in ticks",
   "feature.wynntils.quickCast.spellCooldown.name": "Spell Cooldown",
