@@ -1,5 +1,5 @@
 /*
- * Copyright © Wynntils 2023-2025.
+ * Copyright © Wynntils 2023-2026.
  * This file is released under LGPLv3. See LICENSE for full license details.
  */
 package com.wynntils.models.spells;
@@ -146,7 +146,9 @@ public final class SpellModel extends Model {
 
     @SubscribeEvent
     public void onHeldItemChange(ChangeCarriedItemEvent event) {
-        SPELL_PACKET_QUEUE.clear();
+        // Don't interrupt a QuickCast spell in progress; the spell should continue through weapon swaps
+        if (!SPELL_PACKET_QUEUE.isEmpty()) return;
+
         // We need to reset lastSpell here as the actual inputs are now cleared, but they are still visible
         // so we don't post the expired event until the action bar has actually updated with the cleared inputs
         lastSpell = SpellDirection.NO_SPELL;

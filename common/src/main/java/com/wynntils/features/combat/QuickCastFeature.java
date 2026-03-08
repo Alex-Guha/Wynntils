@@ -107,7 +107,10 @@ public class QuickCastFeature extends Feature {
 
     @SubscribeEvent
     public void onHeldItemChange(ChangeCarriedItemEvent event) {
-        resetState();
+        // Don't reset if we're mid-spellcast; the spell should continue through weapon swaps
+        if (Models.Spell.isSpellQueueEmpty()) {
+            resetState();
+        }
     }
 
     @SubscribeEvent
@@ -227,26 +230,16 @@ public class QuickCastFeature extends Feature {
         }
 
         if (safeCasting.get() == SafeCastType.PREVENT_MISCAST_CASCADE && spellInProgress.length != 0) {
-            if (awaitingConfirmation) {
+            if (awaitingConfirmation && isServerProcessingPreviousSend(spellInProgress)) {
                 // We recently sent a complete spell and the server hasn't confirmed it yet.
-                // The in-progress state is from our own send still being processed.
+                // The in-progress state is a prefix of our expected spell, so the server is
+                // still processing our previous send.
                 // Queue the full new spell -- the server will finish the old one on its own.
-                //
-                // NOTE: There is a known timing-window issue here. If a packet was dropped from
-                // our last send, the in-progress state could represent genuine packet loss
-                // rather than server processing delay. In that case, queueing the full spell
-                // can cause the wrong spell to complete on the server (e.g., residual clicks
-                // combine with the new spell's clicks, shifting the 3-click boundary). This can
-                // cascade into further mismatched or even non-player spells (starting with L).
-                // This window is narrow in practice: it requires the player to cast fast enough
-                // that awaitingConfirmation is still true, but slow enough that the stale
-                // action bar update has arrived. Spell expiry events typically clear
-                // awaitingConfirmation within a few seconds, limiting the exposure.
             } else {
-                // No recent send from us. This is a genuine in-progress spell
-                // (e.g., from manual clicking, weapon switch interruption, or confirmed packet
-                // loss).
-                // Apply compatibility logic to finish it if possible.
+                // Either we're not awaiting confirmation, or the in-progress state doesn't
+                // match what we expected (indicating packet loss changed the server state).
+                // Apply compatibility logic to finish the in-progress spell if possible.
+                awaitingConfirmation = false;
                 for (int i = 0; i < spellInProgress.length; i++) {
                     if (spellInProgress[i] == unconfirmedSpell.get(i)) {
                         confirmedSpell.removeFirst();
@@ -311,6 +304,21 @@ public class QuickCastFeature extends Feature {
         spellMismatchDetected = false;
         lastQueuedSpell = List.of();
         expectedCompletedSpell = List.of();
+    }
+
+    private boolean isServerProcessingPreviousSend(SpellDirection[] spellInProgress) {
+        // Check if the in-progress state is a prefix of the spell we last sent.
+        // If so, the server is still processing our previous send (normal latency).
+        // If not, packet loss has altered the server state and we can't trust awaitingConfirmation.
+        if (expectedCompletedSpell.isEmpty()) return false;
+        if (spellInProgress.length > expectedCompletedSpell.size()) return false;
+
+        for (int i = 0; i < spellInProgress.length; i++) {
+            if (spellInProgress[i] != expectedCompletedSpell.get(i)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void sendCancelReason(MutableComponent reason) {
