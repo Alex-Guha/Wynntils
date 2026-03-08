@@ -146,9 +146,7 @@ public final class SpellModel extends Model {
 
     @SubscribeEvent
     public void onHeldItemChange(ChangeCarriedItemEvent event) {
-        // Don't interrupt a QuickCast spell in progress; the spell should continue through weapon swaps
-        if (!SPELL_PACKET_QUEUE.isEmpty()) return;
-
+        SPELL_PACKET_QUEUE.clear();
         // We need to reset lastSpell here as the actual inputs are now cleared, but they are still visible
         // so we don't post the expired event until the action bar has actually updated with the cleared inputs
         lastSpell = SpellDirection.NO_SPELL;

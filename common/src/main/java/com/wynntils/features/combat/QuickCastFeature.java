@@ -107,10 +107,7 @@ public class QuickCastFeature extends Feature {
 
     @SubscribeEvent
     public void onHeldItemChange(ChangeCarriedItemEvent event) {
-        // Don't reset if we're mid-spellcast; the spell should continue through weapon swaps
-        if (Models.Spell.isSpellQueueEmpty()) {
-            resetState();
-        }
+        resetState();
     }
 
     @SubscribeEvent
@@ -235,9 +232,14 @@ public class QuickCastFeature extends Feature {
                 // The in-progress state is a prefix of our expected spell, so the server is
                 // still processing our previous send.
                 // Queue the full new spell -- the server will finish the old one on its own.
+            } else if (!awaitingConfirmation && lastSpellTick == 0) {
+                // lastSpellTick == 0 means resetState() was called (weapon swap or world change).
+                // The spellInProgress is stale data from a delayed action bar update that arrived
+                // after the reset. Ignore it and queue the full spell.
             } else {
-                // Either we're not awaiting confirmation, or the in-progress state doesn't
-                // match what we expected (indicating packet loss changed the server state).
+                // Either we're not awaiting confirmation with an active spell context, or the
+                // in-progress state doesn't match what we expected (indicating packet loss
+                // changed the server state).
                 // Apply compatibility logic to finish the in-progress spell if possible.
                 awaitingConfirmation = false;
                 for (int i = 0; i < spellInProgress.length; i++) {
